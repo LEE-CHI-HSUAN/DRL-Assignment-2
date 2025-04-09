@@ -2,6 +2,7 @@ import sys
 import numpy as np
 import random
 
+
 class Connect6Game:
     def __init__(self, size=19):
         self.size = size
@@ -34,11 +35,19 @@ class Connect6Game:
                     current_color = self.board[r, c]
                     for dr, dc in directions:
                         prev_r, prev_c = r - dr, c - dc
-                        if 0 <= prev_r < self.size and 0 <= prev_c < self.size and self.board[prev_r, prev_c] == current_color:
+                        if (
+                            0 <= prev_r < self.size
+                            and 0 <= prev_c < self.size
+                            and self.board[prev_r, prev_c] == current_color
+                        ):
                             continue
                         count = 0
                         rr, cc = r, c
-                        while 0 <= rr < self.size and 0 <= cc < self.size and self.board[rr, cc] == current_color:
+                        while (
+                            0 <= rr < self.size
+                            and 0 <= cc < self.size
+                            and self.board[rr, cc] == current_color
+                        ):
                             count += 1
                             rr += dr
                             cc += dc
@@ -48,15 +57,15 @@ class Connect6Game:
 
     def index_to_label(self, col):
         """Converts a column index to a letter (skipping 'I')."""
-        return chr(ord('A') + col + (1 if col >= 8 else 0))
+        return chr(ord("A") + col + (1 if col >= 8 else 0))
 
     def label_to_index(self, col_char):
         """Converts a column letter to an index (handling the missing 'I')."""
         col_char = col_char.upper()
-        if col_char >= 'J':  # 'I' is skipped
-            return ord(col_char) - ord('A') - 1
+        if col_char >= "J":  # 'I' is skipped
+            return ord(col_char) - ord("A") - 1
         else:
-            return ord(col_char) - ord('A')
+            return ord(col_char) - ord("A")
 
     def play_move(self, color, move):
         """Processes a move and updates the board."""
@@ -64,7 +73,7 @@ class Connect6Game:
             print("? Game over")
             return
 
-        stones = move.split(',')
+        stones = move.split(",")
         positions = []
 
         for stone in stones:
@@ -72,17 +81,20 @@ class Connect6Game:
             col_char = stone[0].upper()
             col = self.label_to_index(col_char)
             row = int(stone[1:]) - 1
-            if not (0 <= row < self.size and 0 <= col < self.size) or self.board[row, col] != 0:
+            if (
+                not (0 <= row < self.size and 0 <= col < self.size)
+                or self.board[row, col] != 0
+            ):
                 print("? Invalid move")
                 return
             positions.append((row, col))
 
         for row, col in positions:
-            self.board[row, col] = 1 if color.upper() == 'B' else 2
+            self.board[row, col] = 1 if color.upper() == "B" else 2
 
         self.last_opponent_move = positions[-1]  # Track the opponent's last move
         self.turn = 3 - self.turn
-        print('= ', end='', flush=True)
+        print("= ", end="", flush=True)
 
     def generate_move(self, color):
         """Generates the best move based on predefined rules and ensures output."""
@@ -90,9 +102,14 @@ class Connect6Game:
             print("? Game over", flush=True)
             return
 
-        my_color = 1 if color.upper() == 'B' else 2
+        my_color = 1 if color.upper() == "B" else 2
         opponent_color = 3 - my_color
-        empty_positions = [(r, c) for r in range(self.size) for c in range(self.size) if self.board[r, c] == 0]
+        empty_positions = [
+            (r, c)
+            for r in range(self.size)
+            for c in range(self.size)
+            if self.board[r, c] == 0
+        ]
 
         # 1. Winning move
         for r, c in empty_positions:
@@ -143,9 +160,12 @@ class Connect6Game:
         # 6. Default move: play near last opponent move
         if self.last_opponent_move:
             last_r, last_c = self.last_opponent_move
-            potential_moves = [(r, c) for r in range(max(0, last_r - 2), min(self.size, last_r + 3))
-                                           for c in range(max(0, last_c - 2), min(self.size, last_c + 3))
-                                           if self.board[r, c] == 0]
+            potential_moves = [
+                (r, c)
+                for r in range(max(0, last_r - 2), min(self.size, last_r + 3))
+                for c in range(max(0, last_c - 2), min(self.size, last_c + 3))
+                if self.board[r, c] == 0
+            ]
             if potential_moves:
                 selected = random.choice(potential_moves)
                 move_str = f"{self.index_to_label(selected[1])}{selected[0]+1}"
@@ -167,12 +187,20 @@ class Connect6Game:
         for dr, dc in directions:
             count = 1
             rr, cc = r + dr, c + dc
-            while 0 <= rr < self.size and 0 <= cc < self.size and self.board[rr, cc] == color:
+            while (
+                0 <= rr < self.size
+                and 0 <= cc < self.size
+                and self.board[rr, cc] == color
+            ):
                 count += 1
                 rr += dr
                 cc += dc
             rr, cc = r - dr, c - dc
-            while 0 <= rr < self.size and 0 <= cc < self.size and self.board[rr, cc] == color:
+            while (
+                0 <= rr < self.size
+                and 0 <= cc < self.size
+                and self.board[rr, cc] == color
+            ):
                 count += 1
                 rr -= dr
                 cc -= dc
@@ -185,13 +213,21 @@ class Connect6Game:
                 score += 1000
             elif count == 2:
                 score += 100
-    
+
         return score
+
     def show_board(self):
         """Displays the board in text format."""
         print("= ")
         for row in range(self.size - 1, -1, -1):
-            line = f"{row+1:2} " + " ".join("X" if self.board[row, col] == 1 else "O" if self.board[row, col] == 2 else "." for col in range(self.size))
+            line = f"{row+1:2} " + " ".join(
+                (
+                    "X"
+                    if self.board[row, col] == 1
+                    else "O" if self.board[row, col] == 2 else "."
+                )
+                for col in range(self.size)
+            )
             print(line)
         col_labels = "   " + " ".join(self.index_to_label(i) for i in range(self.size))
         print(col_labels)
@@ -199,7 +235,7 @@ class Connect6Game:
 
     def list_commands(self):
         """Lists all available commands."""
-        print("= ", flush=True)  
+        print("= ", flush=True)
 
     def process_command(self, command):
         """Parses and executes GTP commands."""
@@ -209,7 +245,7 @@ class Connect6Game:
 
         if not command:
             return
-        
+
         parts = command.split()
         cmd = parts[0].lower()
 
@@ -226,7 +262,7 @@ class Connect6Game:
                 print("? Invalid play command format")
             else:
                 self.play_move(parts[1], parts[2])
-                print('', flush=True)
+                print("", flush=True)
         elif cmd == "genmove":
             if len(parts) < 2:
                 print("? Invalid genmove command format")
@@ -254,6 +290,7 @@ class Connect6Game:
                 break
             except Exception as e:
                 print(f"? Error: {str(e)}")
+
 
 if __name__ == "__main__":
     game = Connect6Game()
