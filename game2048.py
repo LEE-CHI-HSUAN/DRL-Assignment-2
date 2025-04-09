@@ -295,3 +295,94 @@ class Game2048Env(gym.Env):
         else:
             raise ValueError("Invalid action")
         return not np.array_equal(self.board, temp_board)
+
+
+class NTupleApproximator:
+    def __init__(self, board_size: int, patterns: list[tuple], gamma: float) -> None:
+        """
+        Initializes the N-Tuple approximator.
+        Hint: you can adjust these if you want
+        """
+        self.board_size = board_size
+        self.patterns = patterns
+        self.gamma = gamma
+        # Create a weight dictionary for each pattern (shared within a pattern group)
+        self.LUTs = [defaultdict(float) for _ in patterns]
+        # Generate symmetrical transformations for each pattern
+        self.symmetry_patterns = tuple(
+            self.generate_symmetries(pattern) for pattern in self.patterns
+        )
+        self.normalize_term = 1 / (len(self.patterns) * len(self.symmetry_patterns[0]))
+
+    def generate_symmetries(self, pattern: tuple) -> list[tuple]:
+        # Generate 8 symmetrical transformations of the given pattern.
+        syms = [pattern]
+        for _ in range(3):
+            pattern = self.rotate90(pattern)
+            syms.append(pattern)
+
+        pattern = self.transpose(pattern)
+        syms.append(pattern)
+        for _ in range(3):
+            pattern = self.rotate90(pattern)
+            syms.append(pattern)
+
+        return tuple(syms)
+
+    def tile_to_index(self, tile: int) -> int:
+        """Converts tile values to an index for the lookup table."""
+        return 0 if tile == 0 else np.log2(tile)
+
+    def get_feature(self, board: np.ndarray, coords: list[tuple]) -> tuple:
+        # Extract tile values from the board based on the given coordinates and convert them into a feature tuple.
+        return tuple(self.tile_to_index(board[x, y]) for x, y in coords)
+
+    def value(self, board: np.ndarray) -> float:
+        """
+        State value function.
+        Only accept after state (after move and before gen new tiles).
+        """
+        value = 0
+        for LUT, sym_pattern_set in zip(self.LUTs, self.symmetry_patterns):
+            for sym_pattern in sym_pattern_set:
+                feature = self.get_feature(board, sym_pattern)
+                value += LUT[feature]
+        return value * self.normalize_term
+
+    def action_value(self, env, action: int) -> float:
+        """
+        State-action value funtion
+        Only accept normal game state (with new tiles).
+        """
+        sim_env = env.copy()
+
+        reward = sim_env.st(action)
+        after_state_value = self.value(sim_env.board)
+        sim_env.ep()
+
+        return reward + self.gamma * after_state_value
+
+    def update(self, board: np.ndarray, delta: float) -> None:
+        """
+        Update weights based on the TD error.
+        delta = TD error * learning rate
+        """
+        for LUT, sym_pattern_set in zip(self.LUTs, self.symmetry_patterns):
+            for sym_pattern in sym_pattern_set:
+                feature = self.get_feature(board, sym_pattern)
+                LUT[feature] += delta
+
+    def get_action(self, env, legal_moves: list[int], epsilon: float = 0):
+        if random.random() < epsilon:
+            return random.choice(legal_moves)
+        return max(legal_moves, key=lambda a: self.action_value(env, a))
+
+    def rotate90(self, pattern: tuple) -> tuple:
+        """
+        rotate a pattern clockwise for 90 degrees
+        """
+        return tuple((y, self.board_size - 1 - x) for x, y in pattern)
+
+    @staticmethod
+    def transpose(pattern: tuple) -> tuple:
+        return tuple((y, x) for x, y in pattern)
