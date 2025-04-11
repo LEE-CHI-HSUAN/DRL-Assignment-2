@@ -14,8 +14,9 @@ def td_learning(
     alpha: float = 0.01,
     gamma: float = 0.0,
     epsilon: float = 0.0,
-    memory_size: int = 10000,
-    batch_size: int = 32,
+    memory_size: int = 5000,
+    use_batch: bool = False,
+    batch_size: int = 4,
     log_steps: int = 100,
     save_steps: int = 1000,
 ):
@@ -57,33 +58,31 @@ def td_learning(
             if done:
                 break
 
-            # Store transition to replay memory
-            replay_memory.append(
-                Transition(
-                    pre_after_state=pre_after_state,
-                    after_state=after_state,
-                    reward=reward,
+            # update
+            if not use_batch:
+                delta = (
+                    reward
+                    + gamma * approximator.value(after_state)
+                    - approximator.value(pre_after_state)
                 )
-            )
-
-            # # update
-            # delta = (
-            #     reward
-            #     + gamma * approximator.value(after_state)
-            #     - approximator.value(pre_after_state)
-            # )
-            # approximator.update(pre_after_state, alpha * delta)
-
-            # batch update
-            if len(replay_memory) >= batch_size:
-                batch = random.sample(replay_memory, batch_size)
-                for tr in batch:
-                    delta = (
-                        tr.reward
-                        + gamma * approximator.value(tr.after_state)
-                        - approximator.value(tr.pre_after_state)
+                approximator.update(pre_after_state, alpha * delta)
+            else:  # batch update
+                replay_memory.append(
+                    Transition(
+                        pre_after_state=pre_after_state,
+                        after_state=after_state,
+                        reward=reward,
                     )
-                    approximator.update(tr.pre_after_state, alpha * delta)
+                )
+                if len(replay_memory) >= batch_size:
+                    batch = random.sample(replay_memory, batch_size)
+                    for tr in batch:
+                        delta = (
+                            tr.reward
+                            + gamma * approximator.value(tr.after_state)
+                            - approximator.value(tr.pre_after_state)
+                        )
+                        approximator.update(tr.pre_after_state, alpha * delta)
 
             pre_after_state = after_state
 
@@ -114,6 +113,7 @@ def main():
     patterns = [
         ((0, 0), (0, 1), (1, 0), (1, 1)),  # corner square
         ((0, 1), (0, 2), (1, 1), (1, 2)),  # edge square
+        # ((1, 1), (1, 2), (2, 1), (2, 2)),  # center square
         ((0, 0), (0, 1), (0, 2), (0, 3)),  # edge line
         ((1, 0), (1, 1), (1, 2), (1, 3)),  # middle line
     ]
