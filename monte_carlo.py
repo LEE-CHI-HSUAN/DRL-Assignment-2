@@ -1,7 +1,8 @@
 import copy
 import numpy as np
 
-class MCTS_Node():
+
+class MCTS_Node:
     C = np.pi * 2000
 
     def __init__(self, parent, action, env):
@@ -16,13 +17,14 @@ class MCTS_Node():
         self.CsqrtlogN = 0
         self.inv_sqrtN = 0
         self.mean = 0
-    
-    def update(self, n: int, score: float):
+
+    def update(self, n, score):
         self.N += n
         self.sum += score
         self.CsqrtlogN = MCTS_Node.C * np.sqrt(np.log(self.N))
         self.inv_sqrtN = 1 / np.sqrt(self.N)
         self.mean = self.sum / self.N
+
 
 class MCS:
     def __init__(self, env, value_approximator, batch_size=10):
@@ -30,7 +32,7 @@ class MCS:
         self.batch_size = batch_size
         self.value_func = value_approximator
 
-    def simulate(self, root: MCTS_Node, steps: int = 10) -> tuple[int, float]:
+    def simulate(self, root, steps=10):
         self.set_env(root)
         legal_moves = [a for a in range(4) if self.env.is_move_legal(a)]
         if not legal_moves:
@@ -70,6 +72,6 @@ class MCS:
 
         return best_move
 
-    def set_env(self, node: MCTS_Node):
+    def set_env(self, node):
         self.env.board = node.board.copy()
         self.env.score = node.score
