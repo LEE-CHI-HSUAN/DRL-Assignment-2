@@ -22,14 +22,14 @@ with open("value_weights.pkl", "rb") as fin:
     approximator.LUTs = pickle.load(fin)
 
 env = Game2048Env()
-mcs = MCS(env, approximator, batch_size=30)
+mcs = MCS(env, approximator, batch_size=15)
 
 
 def get_action(state, score):
     env.board = state
     env.score = score
     root = MCTS_Node(None, None, env)
-    action = mcs.simulate(root, steps=5)
+    action = mcs.simulate(root, steps=7)
     return action
 
     # You can submit this random agent to evaluate the performance of a purely random strategy.
