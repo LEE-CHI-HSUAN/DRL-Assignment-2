@@ -37,10 +37,46 @@ class Connect6Logic:
         else:
             return 2  # All other turns require 2 stones
 
+    def check_win_incremental(self, board, r, c):
+        """Checks if the last move at (r, c) resulted in a win."""
+        size = board.shape[0]
+        player = board[r, c]
+        if player == 0:
+            return 0  # Should not happen if called correctly
+
+        directions = [(0, 1), (1, 0), (1, 1), (1, -1)]  # H, V, Diag\, Diag/
+
+        for dr, dc in directions:
+            count = 1  # Start with the stone just placed
+            # Count forwards
+            for i in range(1, 6):
+                rr, cc = r + i * dr, c + i * dc
+                if 0 <= rr < size and 0 <= cc < size and board[rr, cc] == player:
+                    count += 1
+                else:
+                    break
+            # Count backwards
+            for i in range(1, 6):
+                rr, cc = r - i * dr, c - i * dc
+                if 0 <= rr < size and 0 <= cc < size and board[rr, cc] == player:
+                    count += 1
+                else:
+                    break
+
+            if count >= 6:
+                return player  # Found a win
+
+        return 0  # No win found originating from this move
+
     def check_win_on_board(self, board):
         """Checks if a player has won on a given board state (numpy array).
         Returns: 1 (Black Win), 2 (White Win), 0 (No Winner Yet), 3 (Draw - board full)
+        Optimized to potentially use incremental check if useful, but full check is robust.
+        NOTE: For MCTS node creation, this full check is okay because it's cached.
+              The main optimization is for the SIMULATION phase.
         """
+        # ... (keep the original full board check logic here for robustness) ...
+        # ... or potentially adapt it slightly ...
         size = board.shape[0]
         if size < 6:
             return 0
@@ -56,8 +92,18 @@ class Connect6Logic:
                     board_is_full = False  # Found an empty cell
                     continue  # No need to check win from empty cell
 
-                # Check for win starting from (r, c)
+                # Optimization: Only start checking from a position if it doesn't have
+                # the same color stone "behind" it in the current direction check,
+                # preventing redundant checks of the same line.
                 for dr, dc in directions:
+                    prev_r, prev_c = r - dr, c - dc
+                    if (
+                        0 <= prev_r < size
+                        and 0 <= prev_c < size
+                        and board[prev_r, prev_c] == player
+                    ):
+                        continue  # Already checked this line starting from an earlier stone
+
                     count = 0
                     for i in range(6):  # Check up to 6 stones in this direction
                         rr, cc = r + i * dr, c + i * dc
@@ -614,54 +660,66 @@ class Connect6Game:
     def simulate_random_game(self, board_state, n_stones_start):
         """
         Simulates a random game from the given state respecting Connect 6 rules.
-        Uses n_stones to manage turns.
+        Uses OPTIMIZED incremental win checks and legal move tracking.
         Returns winner (1 or 2) or 3 for draw.
         """
-        current_board = board_state.copy()
+        current_board = (
+            board_state.copy()
+        )  # *** IMPORTANT: Copy state for simulation ***
         n_stones = n_stones_start
         size = current_board.shape[0]
 
-        while True:
-            # Check for win/draw BEFORE making a move
-            winner = self.logic.check_win_on_board(current_board)
-            if winner != 0:  # Win (1 or 2) or Draw (3)
-                return winner
+        # *** OPTIMIZATION: Get initial legal moves and use a set for efficient removal ***
+        # Need to handle potential case where board_state is already terminal
+        initial_winner = self.logic.check_win_on_board(current_board)
+        if initial_winner != 0:
+            return initial_winner
 
+        legal_moves_set = set(self.logic.get_legal_moves_on_board(current_board))
+        if not legal_moves_set:
+            return 3  # Draw if no moves initially
+
+        while True:
             # Determine current player and stones needed for *this* turn
             current_player = self.logic.get_player_for_n_stones(n_stones)
             stones_to_play_this_turn = self.logic.get_stones_required_for_n_stones(
                 n_stones
             )
 
-            legal_moves = self.logic.get_legal_moves_on_board(current_board)
-            if not legal_moves:
-                # Should have been caught by check_win_on_board as a draw, but double check
-                return 3  # Draw (no moves left)
-
             # Play the required number of stones randomly
             for i in range(stones_to_play_this_turn):
-                # Check for win/draw *between* placing 1st and 2nd stone
-                # Although check_win_on_board is relatively quick now,
-                # we can optimize by only checking *after* the full turn usually.
-                # However, a win can happen on the first stone of a 2-stone turn.
-                winner_interim = self.logic.check_win_on_board(current_board)
-                if winner_interim != 0:
-                    return winner_interim
-
-                legal_moves = self.logic.get_legal_moves_on_board(current_board)
-                if not legal_moves:
-                    # If no moves left after placing first stone, it's a draw
+                if not legal_moves_set:
+                    # Board is full, should have been caught by win check, but safety net
                     return 3  # Draw
 
-                # Choose and play random move
-                move = random.choice(legal_moves)
+                # *** OPTIMIZATION: Choose random move from the set ***
+                move = random.choice(
+                    list(legal_moves_set)
+                )  # Convert to list for choice
                 r, c = move
                 current_board[r, c] = current_player
-                n_stones += 1  # Increment stone count
+                n_stones += 1
+                legal_moves_set.remove(move)  # *** OPTIMIZATION: Remove from set ***
+
+                # *** OPTIMIZATION: Use incremental win check ***
+                winner = self.logic.check_win_incremental(current_board, r, c)
+                if winner != 0:
+                    return winner  # Win found
 
                 # If only one stone required this turn, break inner loop
                 if stones_to_play_this_turn == 1:
                     break
+
+            # After completing a full turn (1 or 2 stones), check for draw explicitly
+            if not legal_moves_set:
+                # Check win one last time in case win check logic missed something
+                final_winner = self.logic.check_win_on_board(
+                    current_board
+                )  # Use full check for safety
+                if final_winner != 0 and final_winner != 3:  # If it's a win (1 or 2)
+                    return final_winner
+                else:  # Otherwise, it's a draw
+                    return 3  # Draw
             # Loop continues to next player's turn
 
     def run_mcts(
