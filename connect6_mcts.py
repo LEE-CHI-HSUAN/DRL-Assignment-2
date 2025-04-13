@@ -210,38 +210,52 @@ class Connect6Game:
         self.turn = 3 - self.turn
         print("= ", end="", flush=True)
 
-    def generate_move(self, color):
-        """Generates a random move near the opponent's last move."""
+    def generate_move(self, color_str):
+        """Generates an intelligent move using MCTS."""
         if self.game_over:
             print("? Game over")
             return
 
-        if self.last_opponent_move:
-            last_r, last_c = self.last_opponent_move
-            potential_moves = [
-                (r, c)
-                for r in range(max(0, last_r - 2), min(self.size, last_r + 3))
-                for c in range(max(0, last_c - 2), min(self.size, last_c + 3))
-                if self.board[r, c] == 0
-            ]
+        # Ensure internal state matches the player color MCTS should plan for
+        self.turn = 1 if color_str.upper() == "B" else 2
+
+        print(f"Generating move for {'Black' if self.turn == 1 else 'White'}...", file=sys.stderr)
+        print(f"Board state before MCTS:", file=sys.stderr)
+        # Could print self.show_board() output to stderr here for debugging
+
+        # --- Call MCTS ---
+        # Adjust time_limit based on requirements (e.g., 4.8 seconds for a 5s limit)
+        best_move_coords = self.find_best_move_mcts(time_limit=4.8)
+
+        # --- Handle MCTS Result ---
+        if best_move_coords:
+            r, c = best_move_coords
+            move_str = f"{self.index_to_label(c)}{r+1}"
+
+            # --- Execute Move ---
+            # IMPORTANT: play_move should only place the stone and check for win/draw.
+            # It should NOT change self.turn. Turn logic is handled by GTP processing loop.
+            self.play_move(color_str, move_str) # Assumes play_move is modified
+
+            # --- Output for GTP ---
+            print(f"= {move_str}\n\n", end="", flush=True) # GTP response format
+            print(f"Generated move (MCTS): {move_str}", file=sys.stderr)
+
         else:
-            potential_moves = [
-                (r, c)
-                for r in range(self.size)
-                for c in range(self.size)
-                if self.board[r, c] == 0
-            ]
-
-        if not potential_moves:
-            print("? No valid moves")
-            return
-
-        selected = random.choice(potential_moves)
-        move_str = f"{self.index_to_label(selected[1])}{selected[0]+1}"
-        self.play_move(color, move_str)
-
-        print(f"{move_str}\n\n", end="", flush=True)
-        print(move_str, file=sys.stderr)
+            # Fallback if MCTS fails or no moves available
+            print("? MCTS failed or no moves available.", file=sys.stderr)
+            legal_moves = self.get_legal_moves()
+            if legal_moves:
+                 r, c = random.choice(legal_moves)
+                 move_str = f"{self.index_to_label(c)}{r+1}"
+                 print(f"Playing random fallback: {move_str}", file=sys.stderr)
+                 self.play_move(color_str, move_str) # Play the fallback
+                 print(f"= {move_str}\n\n", end="", flush=True)
+            else:
+                 # No legal moves, maybe resign?
+                 print("= resign\n\n", end="", flush=True) # Example GTP resign
+                 print("? No legal moves found, resigning.", file=sys.stderr)
+                 self.game_over = True
 
     def show_board(self):
         """Displays the board in text format."""
@@ -487,6 +501,7 @@ class Connect6Game:
                     break  # Cannot proceed further down this path
 
             if node is None:
+                raise RuntimeError("PV finding encounter a 'None' node.")
                 continue  # Start next iteration if selection failed
 
             # 2. Expansion: If node is not terminal and not fully expanded, add a child
