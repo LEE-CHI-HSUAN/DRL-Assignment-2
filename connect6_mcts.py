@@ -138,8 +138,8 @@ class Connect6Logic:
 
 class MCTSNode:
     def __init__(self, state, n_stones, parent=None, move=None, game_logic=None):
-        self.state = state  # The board state (numpy array)
-        self.n_stones = n_stones  # Total stones on the board IN this state
+        self.state = state
+        self.n_stones = n_stones
         self.parent = parent
         self.move = move  # The move (r, c) that led TO this state
 
@@ -657,11 +657,22 @@ class Connect6Game:
             # Let process_command handle other exceptions and print GTP errors
 
     # --- MCTS Simulation ---
-    def simulate_random_game(self, board_state, n_stones_start):
+    def simulate_random_game(self, board_state, n_stones_start, neighborhood_radius=2):
         """
-        Simulates a random game from the given state respecting Connect 6 rules.
-        Uses OPTIMIZED incremental win checks and legal move tracking.
-        Returns winner (1 or 2) or 3 for draw.
+        Simulates a game using a heuristic: prioritize random moves near the
+        opponent's last placement(s). Falls back to global random if no
+        nearby legal moves exist.
+
+        Args:
+            board_state: The starting board numpy array.
+            n_stones_start: The number of stones on the board_state.
+            neighborhood_radius: Defines the square area around opponent moves.
+                                radius=1 -> 3x3 square
+                                radius=2 -> 5x5 square (default)
+                                radius=3 -> 7x7 square
+
+        Returns:
+            Winner (1 or 2) or 3 for Draw.
         """
         current_board = (
             board_state.copy()
@@ -679,6 +690,9 @@ class Connect6Game:
         if not legal_moves_set:
             return 3  # Draw if no moves initially
 
+        # Track the last stone(s) placed by the *previous* player
+        opponent_last_stones = []  # List of (r, c) tuples
+
         while True:
             # Determine current player and stones needed for *this* turn
             current_player = self.logic.get_player_for_n_stones(n_stones)
@@ -686,20 +700,49 @@ class Connect6Game:
                 n_stones
             )
 
-            # Play the required number of stones randomly
+            current_turn_moves = []  # Track moves made *this* turn by current_player
+
             for i in range(stones_to_play_this_turn):
                 if not legal_moves_set:
                     # Board is full, should have been caught by win check, but safety net
                     return 3  # Draw
 
-                # *** OPTIMIZATION: Choose random move from the set ***
-                move = random.choice(
-                    list(legal_moves_set)
-                )  # Convert to list for choice
+                # --- Heuristic Move Selection ---
+                nearby_legal_moves = set()
+                if (
+                    opponent_last_stones
+                ):  # Don't apply heuristic if no opponent moves yet
+                    for opp_r, opp_c in opponent_last_stones:
+                        # Define the bounding box for the neighborhood
+                        min_r, max_r = max(0, opp_r - neighborhood_radius), min(
+                            size - 1, opp_r + neighborhood_radius
+                        )
+                        min_c, max_c = max(0, opp_c - neighborhood_radius), min(
+                            size - 1, opp_c + neighborhood_radius
+                        )
+
+                        # Check legal moves within this box
+                        # Iterate through a bounding box is faster than checking distance for all legal moves
+                        for r_near in range(min_r, max_r + 1):
+                            for c_near in range(min_c, max_c + 1):
+                                if (r_near, c_near) in legal_moves_set:
+                                    nearby_legal_moves.add((r_near, c_near))
+
+                # Choose move: prioritize nearby, fallback to global random
+                if nearby_legal_moves:
+                    # Randomly choose from the nearby candidates
+                    move = random.choice(list(nearby_legal_moves))
+                else:
+                    # Fallback: Choose randomly from all legal moves
+                    move = random.choice(list(legal_moves_set))
+                # --- End Heuristic Move Selection ---
+
+                # Play the chosen move
                 r, c = move
                 current_board[r, c] = current_player
                 n_stones += 1
-                legal_moves_set.remove(move)  # *** OPTIMIZATION: Remove from set ***
+                legal_moves_set.remove(move)
+                current_turn_moves.append(move)  # Record move made this turn
 
                 # *** OPTIMIZATION: Use incremental win check ***
                 winner = self.logic.check_win_incremental(current_board, r, c)
@@ -710,7 +753,9 @@ class Connect6Game:
                 if stones_to_play_this_turn == 1:
                     break
 
-            # After completing a full turn (1 or 2 stones), check for draw explicitly
+            # Update opponent's last moves for the *next* player's turn
+            opponent_last_stones = current_turn_moves
+
             if not legal_moves_set:
                 # Check win one last time in case win check logic missed something
                 final_winner = self.logic.check_win_on_board(
