@@ -8,8 +8,8 @@ on:
     branches: [ main ]
 
 jobs:
-  timeout-minutes: 460
   build:
+    timeout-minutes: 460
     runs-on: ubuntu-latest
 
     strategy:
