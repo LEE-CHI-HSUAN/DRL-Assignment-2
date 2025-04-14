@@ -8,6 +8,7 @@ on:
     branches: [ main ]
 
 jobs:
+  timeout-minutes: 600
   build:
     runs-on: ubuntu-latest
 
