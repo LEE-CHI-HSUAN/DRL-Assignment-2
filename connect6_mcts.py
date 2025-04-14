@@ -135,6 +135,68 @@ class Connect6Logic:
         empty_cells = np.where(board == 0)
         return list(zip(empty_cells[0], empty_cells[1]))  # List of (r, c) tuples
 
+    def _get_line_length(self, board, r, c, dr, dc, player):
+        """Counts consecutive stones for player starting from r,c in direction dr,dc."""
+        count = 0
+        size = board.shape[0]
+        for i in range(1, 6):  # Check up to 5 more stones for a total of 6
+            rr, cc = r + i * dr, c + i * dc
+            if 0 <= rr < size and 0 <= cc < size and board[rr, cc] == player:
+                count += 1
+            else:
+                break
+        return count
+
+    def calculate_heuristic_score(self, board, r, c, player):
+        """
+        Calculates a heuristic score for *hypothetically* placing a stone
+        at (r, c) for 'player'. Based on line lengths formed.
+        NOTE: This version assumes the stone *is* placed.
+        Returns: Score (higher is better), or float('inf') if it's a winning move.
+        """
+        size = board.shape[0]
+        if board[r, c] != 0:
+            return -1  # Should not evaluate occupied squares
+
+        # --- Temporarily place the stone ---
+        board[r, c] = player
+        # --- Check for immediate win ---
+        if self.check_win_incremental(board, r, c) == player:
+            board[r, c] = 0  # Undo move
+            return float("inf")  # Winning move has highest score
+
+        # --- Calculate score based on line lengths ---
+        score = 0
+        directions = [(0, 1), (1, 0), (1, 1), (1, -1)]  # H, V, Diag\, Diag/
+        # Scores based roughly on Gomoku common values (adjust as needed)
+        score_map = {
+            5: 100000,  # Potential win (5 in a row) - rare if win check works
+            4: 5000,  # Open 4 or closed 4 (count = 4 includes the placed stone)
+            3: 500,  # Open 3 or closed 3
+            2: 50,  # Open 2 or closed 2
+            1: 1,  # Single stone connection
+        }
+
+        for dr, dc in directions:
+            # Count in positive direction (excluding the placed stone itself initially)
+            len1 = self._get_line_length(board, r, c, dr, dc, player)
+            # Count in negative direction
+            len2 = self._get_line_length(board, r, c, -dr, -dc, player)
+
+            total_len = len1 + len2 + 1  # +1 for the stone at (r, c)
+
+            # Basic scoring - doesn't distinguish open/closed ends yet
+            if total_len >= 6:  # Should have been caught by win check
+                score += score_map.get(5, 100000) * 2  # Very high score
+            elif total_len >= 2:
+                score += score_map.get(total_len, 0)
+
+            # TODO (Advanced): Add checks for open ends to refine scoring
+            # e.g., an "open 4" (space, X, X, X, X, space) is much better than closed 4.
+
+        board[r, c] = 0  # --- Undo the temporary move ---
+        return score
+
 
 class MCTSNode:
     def __init__(self, state, n_stones, parent=None, move=None, game_logic=None):
@@ -153,19 +215,19 @@ class MCTSNode:
         # --- Determine Player Turn & Cache Terminal Status ---
         # Player whose turn it is *in* this state (derived from n_stones)
         self.player_turn = self._game_logic.get_player_for_n_stones(self.n_stones)
-        self._cached_winner = self._game_logic.check_win_on_board(
-            self.state
-        )  # Cache winner (0, 1, 2, or 3 for draw)
+        self._cached_winner = self._game_logic.check_win_on_board(self.state)
 
-        # Determine untried moves only if the game is not over
-        self.untried_moves = []
-        if not self.is_terminal():
-            self.untried_moves = self._game_logic.get_legal_moves_on_board(self.state)
-            random.shuffle(self.untried_moves)
+        # --- Expansion Control ---
+        self._prioritized_moves = None  # Will hold [(priority, move), ...] or similar
+        self._expansion_index = 0  # Tracks which prioritized move to expand next
 
     def is_fully_expanded(self):
-        # A terminal node is implicitly fully expanded (no more moves possible)
-        return self.is_terminal() or len(self.untried_moves) == 0
+        if self.is_terminal():
+            return True
+        # Check if prioritized list exists and if we've expanded all of them
+        return self._prioritized_moves is not None and self._expansion_index >= len(
+            self._prioritized_moves
+        )
 
     def is_terminal(self):
         # Use the cached result
@@ -186,11 +248,6 @@ class MCTSNode:
         best_children = []
 
         for child in self.children:
-            if child.visits == 0:
-                # Prioritize unvisited children - assign effectively infinite score
-                # Return immediately if an unvisited child is found? Optional optimization.
-                return child  # Select unvisited child first
-
             # UCB calculation
             exploitation_term = child.wins / child.visits
             exploration_term = C_param * math.sqrt(log_parent_visits / child.visits)
@@ -202,22 +259,84 @@ class MCTSNode:
             elif score == best_score:
                 best_children.append(child)
 
-        return (
-            random.choice(best_children) if best_children else None
-        )  # Break ties randomly
+        return random.choice(best_children) if best_children else None
+
+    # --- Heuristic Move Prioritization ---
+    def _calculate_expansion_priority(self):
+        """
+        Calculates priority for all untried moves based on heuristics.
+        Should only be called once when the node is first selected for expansion.
+        """
+        if self._prioritized_moves is not None:  # Already calculated
+            return
+
+        moves_with_priority = []
+        my_color = self.player_turn
+        opponent_color = 3 - my_color
+
+        current_legal_moves = self._game_logic.get_legal_moves_on_board(self.state)
+        # Create a temporary board copy for evaluations
+        temp_board = self.state.copy()
+
+        for move in current_legal_moves:
+            r, c = move
+            priority = 0
+            heuristic_score = 0
+
+            # 1. Check for immediate win for 'my_color'
+            my_win_score = self._game_logic.calculate_heuristic_score(
+                temp_board, r, c, my_color
+            )
+            if my_win_score == float("inf"):
+                priority = 3  # Highest priority: Win
+                heuristic_score = my_win_score  # Keep score for sorting within priority
+            else:
+                # 2. Check for immediate block (opponent win)
+                opponent_win_score = self._game_logic.calculate_heuristic_score(
+                    temp_board, r, c, opponent_color
+                )
+                if opponent_win_score == float("inf"):
+                    priority = 2  # Second priority: Block
+                    heuristic_score = opponent_win_score  # Store score
+                else:
+                    # 3. Use combined heuristic score
+                    priority = 1  # Normal priority
+                    # Evaluate based on combined potential: my gain + opponent's potential loss (higher opponent score means more urgent to block/take)
+                    heuristic_score = my_win_score + opponent_win_score
+
+            moves_with_priority.append(((priority, heuristic_score), move))
+
+        # Sort: Highest priority first, then highest heuristic score within priority
+        moves_with_priority.sort(key=lambda x: x[0], reverse=True)
+
+        # Store just the moves in the calculated order
+        self._prioritized_moves = [item[1] for item in moves_with_priority]
+        self._expansion_index = 0
+
+        # print(f"Prioritized {len(self._prioritized_moves)} moves for node (n_stones={self.n_stones}). Top 5: {self._prioritized_moves[:5]}", file=sys.stderr) # Debug
 
     def expand(self):
-        """Expands the node by adding one child for an untried move."""
+        """
+        Expands the node by adding one child for the highest priority untried move.
+        Calculates priorities lazily on first expansion attempt.
+        """
         if self.is_fully_expanded():
             raise RuntimeError(
                 "Cannot expand a node that is terminal or fully expanded."
             )
-        if not self.untried_moves:
-            raise RuntimeError(
-                "Expand called with no untried moves but not terminal/fully expanded."
-            )
 
-        move = self.untried_moves.pop()
+        # Calculate priorities if not done yet
+        if self._prioritized_moves is None:
+            self._calculate_expansion_priority()
+            # After calculation, check again if fully expanded (maybe no legal moves?)
+            if self.is_fully_expanded():
+                raise RuntimeError(
+                    "Node became fully expanded after priority calculation."
+                )
+
+        # Get the next move based on priority
+        move = self._prioritized_moves[self._expansion_index]
+        self._expansion_index += 1  # Move to the next index for subsequent expansions
         r, c = move
 
         # Create the next state by applying the move
@@ -243,15 +362,6 @@ class MCTSNode:
     def update(self, simulation_result):
         """Updates the node's visits and wins based on the simulation outcome."""
         self.visits += 1
-
-        # Determine the player who made the move *into* this state.
-        # This is the player whose turn it was in the parent node.
-        # If this node is the root (no parent), this doesn't directly apply,
-        # but the perspective holds for children.
-        # The player who moved *to* this state is (3 - self.player_turn) if self.n_stones > 0.
-        # Let's stick to the original convention: wins are from the perspective of the
-        # player whose turn it was IN THE PARENT.
-        # Which player was it in the parent? It was the player who is *not* self.player_turn.
         parent_player_turn = 3 - self.player_turn
 
         # simulation_result is the winner (1, 2, or 3 for draw)
