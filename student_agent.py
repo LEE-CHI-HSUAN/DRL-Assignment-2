@@ -22,7 +22,7 @@ with open("value_weights.pkl", "rb") as fin:
     approximator.LUTs = pickle.load(fin)
 
 env = Game2048Env()
-mcs = MCS(env, approximator, batch_size=21 )
+mcs = MCS(env, approximator, batch_size=21)
 
 
 def get_action(state, score):
